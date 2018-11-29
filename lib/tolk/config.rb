@@ -2,8 +2,6 @@ require 'active_support/core_ext/class/attribute_accessors'
 
 module Tolk
   module Config
-
-
     class << self
       # Mapping : a hash of the type { 'ar'    => 'Arabic' }
       attr_accessor :mapping
@@ -29,6 +27,9 @@ module Tolk
       # specify controller to inherit from to keep Tolk controllers
       # in the same context than the rest of your app
       attr_accessor :base_controller
+
+      # Specifiy table prefix
+      attr_accessor :table_prefix
 
       def reset
         @exclude_gems_token = false

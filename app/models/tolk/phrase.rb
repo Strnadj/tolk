@@ -1,6 +1,6 @@
 module Tolk
   class Phrase < ActiveRecord::Base
-    self.table_name = "tolk_phrases"
+    self.table_name = "#{Tolk::Config.table_prefix}tolk_phrases"
 
     validates_uniqueness_of :key
 
@@ -18,10 +18,8 @@ module Tolk
 
     attr_accessor :translation
 
-#scope :red, -> { where(color: 'red') } rather than scope :red, -> { { conditions: { color: 'red' } } }
-
     scope :containing_text, lambda { |query|
-      where("tolk_phrases.key LIKE ?", "%#{query}%")
+      where("#{Tolk::Phrase.table_name}.key LIKE ?", "%#{query}%")
     }
   end
 end

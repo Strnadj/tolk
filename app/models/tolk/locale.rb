@@ -5,7 +5,7 @@ module Tolk
   class Locale < ActiveRecord::Base
     include Tolk::Pagination::Methods
 
-    self.table_name = "tolk_locales"
+    self.table_name = "#{Tolk::Config.table_prefix}tolk_locales"
 
     def self._dump_path
       # Necessary to acces rails.root at runtime !
@@ -80,15 +80,15 @@ module Tolk
     end
 
     def has_updated_translations?
-      translations.where('tolk_translations.primary_updated' => true).count > 0
+      translations.where(Tolk::Translation.table_name => { primary_updated: true }).any?
     end
 
     def phrases_with_translation(page = nil)
-      find_phrases_with_translations(page, :'tolk_translations.primary_updated' => false)
+      find_phrases_with_translations(page, :"#{Tolk::Translation.table_name}.primary_updated" => false)
     end
 
     def phrases_with_updated_translation(page = nil)
-      find_phrases_with_translations(page, :'tolk_translations.primary_updated' => true)
+      find_phrases_with_translations(page, :"#{Tolk::Translation.table_name}.primary_updated" => true)
     end
 
     def count_phrases_without_translation
@@ -97,23 +97,19 @@ module Tolk
     end
 
     def count_phrases_with_updated_translation(page = nil)
-      find_phrases_with_translations(page, :'tolk_translations.primary_updated' => true).count
+      phrases_with_updated_translation(page).count
     end
 
     def phrases_without_translation(page = nil)
-      phrases = Tolk::Phrase.all.order('tolk_phrases.key ASC')
+      phrases = Tolk::Phrase.order(key: :asc)
 
       existing_ids = self.translations.pluck(:phrase_id).uniq
-      phrases = phrases.where('tolk_phrases.id NOT IN (?)', existing_ids) if existing_ids.present?
 
-      result = phrases.public_send(pagination_method, page)
-      if Rails.version =~ /^4\.0/
-        ActiveRecord::Associations::Preloader.new result, :translations
-      else
-        ActiveRecord::Associations::Preloader.new().preload(result, :translations)
+      if existing_ids.any?
+        phrases = phrases.where.not(Tolk::Phrase.table_name => { id: existing_ids })
       end
 
-      result
+      phrases.preload(:translations).public_send(pagination_method, page)
     end
 
     def search_phrases(query, scope, key_query, page = nil)
@@ -126,34 +122,33 @@ module Tolk
         self.translations.containing_text(query)
       end
 
-      phrases = Tolk::Phrase.all.order('tolk_phrases.key ASC')
+      phrases = Tolk::Phrase.order(key: :asc)
       phrases = phrases.containing_text(key_query)
 
-      phrases = phrases.where('tolk_phrases.id IN(?)', translations.map(&:phrase_id).uniq)
+      phrases = phrases.where(Tolk::Phrase.table_name => { id: translations.map(&:phrase_id).uniq })
       phrases.public_send(pagination_method, page)
     end
 
     def search_phrases_without_translation(query, page = nil)
       return phrases_without_translation(page) unless query.present?
 
-      phrases = Tolk::Phrase.all.order('tolk_phrases.key ASC')
+      phrases = Tolk::Phrase.order(key: :asc)
 
-      found_translations_ids = Tolk::Locale.primary_locale.translations.where(["tolk_translations.text LIKE ?", "%#{query}%"]).to_a.map(&:phrase_id).uniq
-      existing_ids = self.translations.select('tolk_translations.phrase_id').to_a.map(&:phrase_id).uniq
-#      phrases = phrases.scoped(:conditions => ['tolk_phrases.id NOT IN (?) AND tolk_phrases.id IN(?)', existing_ids, found_translations_ids]) if existing_ids.present?
-      phrases = phrases.where(['tolk_phrases.id NOT IN (?) AND tolk_phrases.id IN(?)', existing_ids, found_translations_ids]) if existing_ids.present?
-      result = phrases.public_send(pagination_method, page)
-      if Rails.version =~ /^4\.0/
-        ActiveRecord::Associations::Preloader.new result, :translations
-      else
-        ActiveRecord::Associations::Preloader.new().preload(result, :translations)
+      found_translations_ids = Tolk::Locale.primary_locale.translations.where(["#{Tolk::Translation.table_name}.text LIKE ?", "%#{query}%"]).to_a.map(&:phrase_id).uniq
+      existing_ids = self.translations.pluck(:phrase_id).uniq
+
+      if existing_ids.any?
+        phrases = phrases.where.not(id: existing_ids + found_translations_ids)
       end
+
+      result = phrases.public_send(pagination_method, page)
+      ActiveRecord::Associations::Preloader.new result, :translations
 
       result
     end
 
     def to_hash
-      data = translations.joins(:phrase).order("tolk_phrases.key ASC").pluck("tolk_phrases.key, text").
+      data = translations.joins(:phrase).order("#{Tolk::Phrase.table_name}.key ASC").pluck("#{Tolk::Phrase.table_name}.key, text").
       each_with_object(Hash.new(0)) do |translation, locale|
         if translation[0].include?(".")
           locale.deep_merge!(unsquish(translation[0], translation[1]))
@@ -184,14 +179,9 @@ module Tolk
     end
 
     def translations_with_html
-      translations = self.translations.all(:conditions => "tolk_translations.text LIKE '%>%' AND
-        tolk_translations.text LIKE '%<%' AND tolk_phrases.key NOT LIKE '%_html'", :joins => :phrase)
-      if Rails.version =~ /^4\.0/
-        ActiveRecord::Associations::Preloader.new translations, :phrase
-      else
-        ActiveRecord::Associations::Preloader.new().preload(translations, :phrase)
-      end
       translations
+        .where("text LIKE '%>%' AND text LIKE '%<%' AND key NOT LIKE '%_html'")
+        .preload(:phrase)
     end
 
     def self.rename(old_name, new_name)
@@ -224,7 +214,7 @@ module Tolk
     end
 
     def find_phrases_with_translations(page, conditions = {})
-      result = Tolk::Phrase.where({ :'tolk_translations.locale_id' => self.id }.merge(conditions)).joins(:translations).order('tolk_phrases.key ASC').public_send(pagination_method, page)
+      result = Tolk::Phrase.joins(:translations).where({ :"#{Tolk::Translation.table_name}.locale_id" => self.id }.merge(conditions)).order(key: :asc).public_send(pagination_method, page)
 
       result.each do |phrase|
         phrase.translation = phrase.translations.for(self)

@@ -1,8 +1,8 @@
 module Tolk
   class Translation < ActiveRecord::Base
-    self.table_name = "tolk_translations"
+    self.table_name = "#{Tolk::Config.table_prefix}tolk_translations"
 
-    scope :containing_text, lambda {|query| where("tolk_translations.text LIKE ?", "%#{query}%") }
+    scope :containing_text, -> (query) { where("#{table_name}.text LIKE ?", "%#{query}%") }
 
     serialize :text
     serialize :previous_text
